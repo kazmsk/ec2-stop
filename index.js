@@ -1,84 +1,109 @@
-'use strict';
-
 //definition library
 const aws = require('aws-sdk');
-const foreach = require('co-foreach');
 
 //difinition variables
 const ec2 = new aws.EC2();
 
-exports.handler = (event, context, callback) => {
-  console.log('start function');
+exports.handler = async (event) => {
+  // definition of logger
+  const logger = new Logger();
 
-  // event params
-  console.log(JSON.stringify(event));
-
-  // ec2 nametag list
-  const nameTags = event.nameTags;
-
-  console.log('stop instance');
-  foreach(nameTags, function *(nameTag) {
-    // check instance exists
-    const reservations = yield describeInstance(nameTag);
-    if (reservations.length === 0) {
-      console.log('instance none');
-    } else {
-      const instanceId = reservations[0].Instances[0].InstanceId;
-      // start instance
-      yield stopInstance(instanceId);
-    }
-  }).then(onEnd).catch(onError);
+  // event parameters
+  logger.info('Event parameters');
+  logger.info(event);
 
   // check instance exists
-  function describeInstance(nameTag) {
-    return new Promise((resolve, reject) => {
-      var params = {
-        Filters: [
-          {
-            Name: 'tag-key',
-            Values: ['Name']
-          },
-          {
-            Name: 'tag-value',
-            Values: [nameTag]
-          }
-        ]
-      };
-      ec2.describeInstances(params, (error, response) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve(response.Reservations);
-        }
-      });
-    });
-  }
-
-  // stop instance
-  function stopInstance(instanceId) {
-    return new Promise((resolve, reject) => {
-      const params = {
-        InstanceIds : [instanceId]
-      };
-      ec2.stopInstances(params, function(error, response) {
-        if (error) {
-          reject(error);
-        } else {
-          resolve(null);
-        }
-      });
-    });
-  }
-
-  // end
-  function onEnd(result) {
-    console.log('finish function');
-    callback(null, 'succeed');
-  }
-
-  // error
-  function onError(error) {
-    console.log(error, error.stack);
-    callback(error, error.stack);
+  const reservations = await describeInstance().catch(onError);
+  if (reservations.length === 0) {
+    logger.info('Instance none');
+    return 'End function';
+  } else {
+    // stop instance
+    logger.info('stop instance');
+    for (let reservation of reservations) {
+      const instanceId = reservation.Instances[0].InstanceId;
+      logger.debug(instanceId);
+      await stopInstances(instanceId).catch(onError);
+    }
+    logger.info('Completion stop instace');
+    return 'End function';
   }
 };
+
+// check instance exists
+function describeInstance() {
+  return new Promise((resolve, reject) => {
+    const params = {
+      Filters: [
+        {
+          Name: 'tag-key',
+          Values: ['AutoStop']
+        },
+        {
+          Name: 'tag-value',
+          Values: ['true']
+        }
+      ]
+    };
+    ec2.describeInstances(params, (error, response) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(response.Reservations);
+      }
+    });
+  });
+}
+
+// stop instance
+function stopInstances(instanceId) {
+  return new Promise((resolve, reject) => {
+    const params = {
+      InstanceIds : [instanceId]
+    };
+    ec2.stopInstances(params, (error, response) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+function onError(error) {
+  console.log(error);
+  throw error;
+}
+
+class Logger {
+  constructor() {
+    this.logLevel = process.env.LOG_LEVEL;
+  }
+
+  info(message) {
+    const format = {
+      logLevel: 'INFO',
+      message: message
+    };
+    console.log(JSON.stringify(format));
+  }
+
+  debug(message) {
+    const format = {
+      logLevel: 'DEBUG',
+      message: message
+    };
+    if (this.logLevel == 'DEBUG') {
+      console.log(JSON.stringify(format));
+    }
+  }
+
+  error(message) {
+    const format = {
+      logLevel: 'ERROR',
+      message: message
+    };
+    console.log(JSON.stringify(format));
+  }
+}
